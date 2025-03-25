@@ -21,26 +21,23 @@ def main():
     # Time horizon in months
     time_horizon_months = st.sidebar.number_input("Time Horizon (Months)", min_value=1, max_value=24, value=1)
 
-    # Button to run simulation
     if st.sidebar.button("Generate Plots"):
-        # For each selected ticker, do the pipeline
         for ticker in tickers:
             st.subheader(f"**{ticker}**")
-
             # 1. Fetch data from yfinance
             df = fetch_data(ticker, days)
             if df is None or df.empty:
                 st.warning(f"No data returned for {ticker}.")
                 continue
 
-            # 2. Compute historical returns
+            # 2. Compute historical returns using the "Close" column
             historical_returns = compute_returns(df)
             if len(historical_returns) < 2:
                 st.warning(f"Not enough data points to compute returns for {ticker}.")
                 continue
 
             # 3. Simulate future returns using Brownian Motion
-            sim_returns = simulate_returns(historical_returns, df["Adj Close"].iloc[-1],
+            sim_returns = simulate_returns(historical_returns, df["Close"].iloc[-1],
                                            paths, timesteps, time_horizon_months)
 
             # 4. Plot the histograms side by side
@@ -49,19 +46,12 @@ def main():
 
 def fetch_data(ticker, days):
     """
-    Fetches ~'days' of historical data for 'ticker' using yfinance.
+    Fetches approximately 'days' of historical data for the given ticker using yfinance.
     """
     try:
-        # end date: today, start date: 'days' days ago
         end_date = pd.Timestamp.today()
         start_date = end_date - pd.Timedelta(days=days)
-
-        # Download data from Yahoo Finance
         df = yf.download(ticker, start=start_date, end=end_date, progress=False)
-        if df is None or df.empty:
-            return None
-        
-        # Ensure we have 'Adj Close'
         df = df.sort_index()
         return df
     except Exception as e:
@@ -70,23 +60,21 @@ def fetch_data(ticker, days):
 
 def compute_returns(df):
     """
-    Computes daily returns (Adj Close(t) / Adj Close(t-1) - 1) from a DataFrame
-    with an 'Adj Close' column.
+    Computes daily returns using the "Close" column.
     """
-    prices = df["Adj Close"].values
+    prices = df["Close"].values  # using "Close" because auto_adjust=True returns adjusted prices here
     returns = (prices[1:] / prices[:-1]) - 1
     return returns
 
 def simulate_returns(historical_returns, last_price, paths, timesteps, months):
     """
-    Performs a simple Brownian Motion simulation of final returns
-    based on historical mean and std.
+    Simulates future returns via a simple Brownian Motion model.
     """
-    # Mean and standard deviation of historical daily returns
+    # Compute the mean and standard deviation from historical returns
     hist_mean = np.mean(historical_returns)
     hist_std = np.std(historical_returns, ddof=1)
 
-    # Convert months to fraction of a year
+    # Convert time horizon from months to years and compute time step size
     T = months / 12.0
     dt = T / timesteps
 
@@ -95,19 +83,16 @@ def simulate_returns(historical_returns, last_price, paths, timesteps, months):
         price = last_price
         for _ in range(timesteps):
             dW = np.random.normal(0, np.sqrt(dt))
-            # Simple "Euler-Maruyama" style update
             price += price * (hist_mean * dt + hist_std * dW)
         simulated_final_prices.append(price)
 
-    # Convert final prices to returns relative to last historical price
+    # Convert final prices to returns relative to the last historical price
     sim_returns = [p / last_price - 1 for p in simulated_final_prices]
     return sim_returns
 
 def create_histogram_figure(historical_returns, simulated_returns):
     """
-    Creates a Plotly figure with two overlapping histograms:
-    - Historical Returns
-    - Simulated (Predicted) Returns
+    Creates a Plotly figure with overlapping histograms for historical and predicted returns.
     """
     fig = go.Figure()
 
